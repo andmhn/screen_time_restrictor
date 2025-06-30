@@ -34,10 +34,10 @@ The program:
 Edit `config.ini` to customize:
 
 ```ini
-TIME_LIMIT=3600       # Daily limit in seconds (1 hour)
-WARNING_TIME=300      # Warn when this many seconds remain (5 mins)
-IDLE_THRESHOLD=60     # Consider user idle after X seconds
-GRACE_PERIOD=600      # Emergency usage time after limit (10 mins)
+[Settings]
+TimeLimitSeconds=3600       # Daily limit in seconds (1 hour)
+WarningTimeSeconds=300      # Warn when this many seconds remain (5 mins)
+LoginGracePeriodSeconds=600 #  Emergency usage time after limit (10 mins)
 ```
 
 ## Building from Source
@@ -48,7 +48,7 @@ Requirements:
 
 Compile with:
 ```bash
-gcc .\screen_time_restrictor.c -o screen_time_restrictor.exe -luser32 -lshlwapi -mwindows
+gcc .\screen_time_restrictor.c  -o screen_time_restrictor.exe -luser32 -lshlwapi -lshell32 -mwindows
 ```
 
 ## Usage

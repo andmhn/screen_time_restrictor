@@ -1,214 +1,209 @@
 #include <windows.h>
 #include <stdio.h>
 #include <time.h>
-#include <shlwapi.h> // Required for PathRemoveFileSpec and PathAppend. Link with -lshlwapi
+#include <shlwapi.h>
+#include <shellapi.h> // Required for toast notifications
 
-#pragma comment(lib, "Shlwapi.lib") // For MSVC, tells the linker to include Shlwapi.lib
-#pragma comment(lib, "User32.lib") // For MessageBox and LockWorkStation
+#pragma comment(lib, "Shlwapi.lib")
+#pragma comment(lib, "User32.lib")
+#pragma comment(lib, "Shell32.lib") // Required for Shell_NotifyIcon
 
-// Default values if config file doesn't exist or values are invalid
-#define DEFAULT_TIME_LIMIT 3600   // 1 hour in seconds
-#define DEFAULT_WARNING_TIME 300  // 5 minutes before limit
-#define DEFAULT_IDLE_THRESHOLD 60 // 60 seconds of inactivity
-#define DEFAULT_GRACE_PERIOD 600  // 10-minute grace period
+// --- Global Constants ---
+#define MUTEX_NAME "Global\\ScreenTimeRestrictorAppMutex"
+#define IDLE_THRESHOLD_SECONDS 60
+#define WM_TRAYICON (WM_USER + 1) // Custom message for tray icon events
 
-#define USAGE_FILE_NAME "screen_usage.dat"
-#define CONFIG_FILE_NAME "config.ini"
+// --- Global Variables for Settings (loaded from config.ini) ---
+int TIME_LIMIT_SECONDS = 3600;
+int WARNING_TIME_SECONDS = 300;
+int GRACE_PERIOD_SECONDS_LOGIN = 600;
 
-// Global variables
+// --- Global Variables for File Paths ---
 char usageFilePath[MAX_PATH];
 char configFilePath[MAX_PATH];
-int TIME_LIMIT = DEFAULT_TIME_LIMIT;
-int WARNING_TIME = DEFAULT_WARNING_TIME;
-int IDLE_THRESHOLD = DEFAULT_IDLE_THRESHOLD;
-int GRACE_PERIOD = DEFAULT_GRACE_PERIOD;
 
-// --- FUNCTION PROTOTYPES ---
-int get_today_date();
+// --- Global Variables for Application State ---
+int used_seconds = 0;
+int today_date = 0;
+HWND hMainWnd = NULL;
+NOTIFYICONDATA nid = {0}; // Structure for the notification icon
+
+// --- Function Prototypes ---
 void create_file_paths();
-int load_usage(int* stored_date, int* stored_time);
-void save_usage(int date, int time_used);
+void load_config();
+void write_default_config();
+void load_usage();
+void save_usage();
 DWORD get_idle_time();
-void load_configuration();
-void create_default_config();
+void ShowToastNotification(const char* title, const char* message);
+LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
+VOID CALLBACK TimerProc(HWND hwnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTime);
 
-// Gets the current date as an integer (e.g., 20240521)
-int get_today_date() {
-    time_t t = time(NULL);
-    struct tm tm = *localtime(&t);
-    return tm.tm_year * 10000 + (tm.tm_mon + 1) * 100 + tm.tm_mday;
+// --- Function Definitions ---
+
+// Shows a toast-like balloon notification from the system tray.
+void ShowToastNotification(const char* title, const char* message) {
+    nid.uFlags = NIF_INFO;
+    nid.dwInfoFlags = NIIF_WARNING; // Use a warning icon
+    strncpy(nid.szInfoTitle, title, sizeof(nid.szInfoTitle) - 1);
+    strncpy(nid.szInfo, message, sizeof(nid.szInfo) - 1);
+    Shell_NotifyIcon(NIM_MODIFY, &nid);
 }
 
-// Constructs the full paths for both usage and config files
+// Constructs full paths for the usage and config files.
 void create_file_paths() {
     char exePath[MAX_PATH];
-    GetModuleFileName(NULL, exePath, MAX_PATH); // Get path of the .exe
-    PathRemoveFileSpec(exePath);               // Remove the .exe filename, leaving the directory
-    
-    // Create usage file path
-    PathAppend(usageFilePath, exePath);        
-    PathAppend(usageFilePath, USAGE_FILE_NAME);
-    
-    // Create config file path
-    PathAppend(configFilePath, exePath);
-    PathAppend(configFilePath, CONFIG_FILE_NAME);
+    GetModuleFileName(NULL, exePath, MAX_PATH);
+    PathRemoveFileSpec(exePath);
+    PathCombine(usageFilePath, exePath, "screen_usage.dat");
+    PathCombine(configFilePath, exePath, "config.ini");
 }
 
-// Creates a default config file if it doesn't exist
-void create_default_config() {
-    if (GetFileAttributes(configFilePath) == INVALID_FILE_ATTRIBUTES) {
-        FILE* file = fopen(configFilePath, "w");
-        if (file) {
-            fprintf(file, "# Screen Time Restrictor Configuration\n");
-            fprintf(file, "# All values are in seconds\n\n");
-            fprintf(file, "TIME_LIMIT=%d       # 1 hour\n", DEFAULT_TIME_LIMIT);
-            fprintf(file, "WARNING_TIME=%d     # 5 minutes before limit\n", DEFAULT_WARNING_TIME);
-            fprintf(file, "IDLE_THRESHOLD=%d   # 1 minute of inactivity\n", DEFAULT_IDLE_THRESHOLD);
-            fprintf(file, "GRACE_PERIOD=%d     # 10-minute grace period after exhausted user logs in.\n", DEFAULT_GRACE_PERIOD);
-            fclose(file);
-        }
+// Loads settings from config.ini or creates a default one.
+void load_config() {
+    if (!PathFileExists(configFilePath)) {
+        write_default_config();
     }
+    TIME_LIMIT_SECONDS = GetPrivateProfileInt("Settings", "TimeLimitSeconds", 3600, configFilePath);
+    WARNING_TIME_SECONDS = GetPrivateProfileInt("Settings", "WarningTimeSeconds", 300, configFilePath);
+    GRACE_PERIOD_SECONDS_LOGIN = GetPrivateProfileInt("Settings", "LoginGracePeriodSeconds", 600, configFilePath);
 }
 
-// Loads configuration from config.ini file
-void load_configuration() {
-    // First create default config if it doesn't exist
-    create_default_config();
-    
-    FILE* file = fopen(configFilePath, "r");
-    if (file) {
-        char line[256];
-        while (fgets(line, sizeof(line), file)) {
-            // Skip comments and empty lines
-            if (line[0] == '#' || line[0] == '\n') continue;
-            
-            // Parse key-value pairs
-            char key[64], value[64];
-            if (sscanf(line, "%63[^=]=%63[^\n]", key, value) == 2) {
-                if (strcmp(key, "TIME_LIMIT") == 0) TIME_LIMIT = atoi(value);
-                else if (strcmp(key, "WARNING_TIME") == 0) WARNING_TIME = atoi(value);
-                else if (strcmp(key, "IDLE_THRESHOLD") == 0) IDLE_THRESHOLD = atoi(value);
-                else if (strcmp(key, "GRACE_PERIOD") == 0) GRACE_PERIOD = atoi(value);
-            }
-        }
-        fclose(file);
-    }
-    
-    // Validate loaded values
-    if (TIME_LIMIT <= 0) TIME_LIMIT = DEFAULT_TIME_LIMIT;
-    if (WARNING_TIME <= 0 || WARNING_TIME >= TIME_LIMIT) WARNING_TIME = DEFAULT_WARNING_TIME;
-    if (IDLE_THRESHOLD <= 0) IDLE_THRESHOLD = DEFAULT_IDLE_THRESHOLD;
-    if (GRACE_PERIOD <= 0 || GRACE_PERIOD >= TIME_LIMIT) GRACE_PERIOD = DEFAULT_GRACE_PERIOD;
+// Writes a default config.ini file if one doesn't exist.
+void write_default_config() {
+    WritePrivateProfileString("Settings", "TimeLimitSeconds", "3600", configFilePath);
+    WritePrivateProfileString("Settings", "WarningTimeSeconds", "300", configFilePath);
+    WritePrivateProfileString("Settings", "LoginGracePeriodSeconds", "600", configFilePath);
+    // This notification will be shown before the icon is ready, so it remains a MessageBox.
+    MessageBox(NULL, "config.ini not found.\nA new one has been created with default settings.", "Configuration Created", MB_OK | MB_ICONINFORMATION);
 }
 
-// [Rest of the functions remain exactly the same as in previous implementation]
-// Loads the total used time from the data file.
-// If the file doesn't exist or the date has changed, it resets the time.
-int load_usage(int* stored_date, int* stored_time) {
+// Loads today's usage from the data file.
+void load_usage() {
     FILE* file = fopen(usageFilePath, "r");
+    int stored_date = 0;
     if (file) {
-        fscanf(file, "%d %d", stored_date, stored_time);
+        fscanf(file, "%d %d", &stored_date, &used_seconds);
         fclose(file);
-        return 1;
     }
-    *stored_date = get_today_date();
-    *stored_time = 0;
-    return 0;
+    if (stored_date != today_date) {
+        used_seconds = 0;
+    }
 }
 
-// Saves the current usage time and date to the data file.
-void save_usage(int date, int time_used) {
+// Saves current usage to the data file.
+void save_usage() {
     FILE* file = fopen(usageFilePath, "w");
     if (file) {
-        fprintf(file, "%d %d\n", date, time_used);
+        fprintf(file, "%d %d\n", today_date, used_seconds);
         fclose(file);
     }
 }
 
-// Gets the system's idle time in seconds.
+// Gets system idle time in seconds.
 DWORD get_idle_time() {
-    LASTINPUTINFO lii;
-    lii.cbSize = sizeof(LASTINPUTINFO);
+    LASTINPUTINFO lii = { sizeof(LASTINPUTINFO) };
     GetLastInputInfo(&lii);
     return (GetTickCount() - lii.dwTime) / 1000;
 }
 
-// --- MAIN FUNCTION ---
-int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
-    
-    // Create a unique mutex to ensure single instance
-    HANDLE hMutex = CreateMutex(NULL, TRUE, "Global\\ScreenTimeRestrictorMutex");
-    if (GetLastError() == ERROR_ALREADY_EXISTS) {
-        MessageBox(NULL, "Another instance is already running.", "Screen Time Restrictor", MB_OK | MB_ICONINFORMATION);
-        CloseHandle(hMutex);
-        return 0; // Exit the application
-    }
+// Main logic callback, executed by the timer once per second.
+VOID CALLBACK TimerProc(HWND hwnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTime) {
+    if (get_idle_time() < IDLE_THRESHOLD_SECONDS) {
+        used_seconds++;
+        int remaining_seconds = TIME_LIMIT_SECONDS - used_seconds;
 
-    
-    int saved_date, used_seconds;
-    int current_date = get_today_date();
-    
-    // Determine the paths for both files before using them
-    create_file_paths();
-    
-    // Load configuration from file (will create default if needed)
-    load_configuration();
-    
-    load_usage(&saved_date, &used_seconds);
+        // --- WARNING LOGIC (Toast Notifications) ---
+        if (remaining_seconds > 0 && remaining_seconds <= WARNING_TIME_SECONDS && remaining_seconds % 60 == 0) {
+            char warningMsg[256];
+            sprintf(warningMsg, "The system will lock in %d minute(s).", remaining_seconds / 60);
+            ShowToastNotification("Screen Time Warning", warningMsg);
+        }
 
-    // If it's a new day, reset the timer.
-    if (saved_date != current_date) {
-        used_seconds = 0;
-        saved_date = current_date;
-        save_usage(saved_date, used_seconds); // Save the reset
-    }
+        // --- SAVE LOGIC ---
+        if (used_seconds % 60 == 0) {
+            save_usage();
+        }
 
-    // Grace Period Logic
-    // If the user logs in and time is already up, grant a 10-minute grace period.
-    if (used_seconds >= TIME_LIMIT) {
-        char graceMsg[256];
-        sprintf(graceMsg, "Your screen time for today is up.\nYou have a %d-minute grace period for essential tasks.", GRACE_PERIOD / 60);
-        MessageBox(NULL, graceMsg, "Grace Period Granted", MB_OK | MB_ICONINFORMATION | MB_TOPMOST);
-        used_seconds = TIME_LIMIT - GRACE_PERIOD;
-        save_usage(current_date, used_seconds);
-    }
-
-    while (1) {
-        Sleep(1000); // Check every second
-
-        if (get_idle_time() < IDLE_THRESHOLD) {
-            used_seconds++;
-
-            int remaining_seconds = TIME_LIMIT - used_seconds;
-
-            // Logic for minute-by-minute warnings
-            if (remaining_seconds > 0 && remaining_seconds <= WARNING_TIME) {
-                if (remaining_seconds % 60 == 0) {
-                    char warningMsg[256];
-                    int minutes_left = remaining_seconds / 60;
-                    sprintf(warningMsg, "⚠️ You are nearing your screen time limit!\n\nThe system will lock in %d minute(s).", minutes_left);
-                    
-                    MessageBox(NULL, warningMsg, "Screen Time Warning", MB_OK | MB_ICONWARNING | MB_TOPMOST);
-                }
-            }
-
-            // Save usage every minute
-            if (used_seconds > 0 && used_seconds % 60 == 0) {
-                save_usage(current_date, used_seconds);
-            }
-
-            // Lock the workstation if the time limit is reached.
-            if (used_seconds >= TIME_LIMIT) {
-                MessageBox(NULL, "⛔ Screen time limit reached! Locking the system now.", "Time Up", MB_OK | MB_ICONERROR | MB_TOPMOST);
-                save_usage(current_date, used_seconds);
-                LockWorkStation();
-                break; // Exit the loop
-            }
+        // --- LOCK LOGIC ---
+        if (used_seconds >= TIME_LIMIT_SECONDS) {
+            save_usage();
+            // This is a critical, final notification, so it remains a blocking MessageBox.
+            MessageBox(NULL, "Screen time limit reached! Locking the system.", "Time Up", MB_OK | MB_ICONERROR | MB_TOPMOST);
+            KillTimer(hMainWnd, 1);
+            LockWorkStation();
+            PostQuitMessage(0);
         }
     }
+}
 
-    // Release the mutex when done (though this may not be reached if LockWorkStation is called)
+// Window procedure to handle messages for our hidden window.
+LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
+    if (uMsg == WM_DESTROY) {
+        PostQuitMessage(0);
+        return 0;
+    }
+    return DefWindowProc(hwnd, uMsg, wParam, lParam);
+}
+
+
+// Main entry point
+int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
+    // Single instance check
+    HANDLE hMutex = CreateMutex(NULL, TRUE, MUTEX_NAME);
+    if (hMutex == NULL || GetLastError() == ERROR_ALREADY_EXISTS) {
+        if (hMutex) CloseHandle(hMutex);
+        return 0;
+    }
+
+    // Setup hidden window
+    WNDCLASS wc = {0};
+    wc.lpfnWndProc = WindowProc;
+    wc.hInstance = hInstance;
+    wc.lpszClassName = "ScreenTimerHiddenWindow";
+    RegisterClass(&wc);
+    hMainWnd = CreateWindowEx(0, wc.lpszClassName, NULL, 0, 0, 0, 0, 0, HWND_MESSAGE, NULL, hInstance, NULL);
+    if (!hMainWnd) return 1;
+
+    // --- SETUP NOTIFICATION ICON ---
+    nid.cbSize = sizeof(NOTIFYICONDATA);
+    nid.hWnd = hMainWnd;
+    nid.uID = 100;
+    nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
+    nid.uCallbackMessage = WM_TRAYICON;
+    nid.hIcon = LoadIcon(NULL, IDI_INFORMATION); // Use a standard system icon
+    strcpy(nid.szTip, "Screen Time Restrictor");
+    Shell_NotifyIcon(NIM_ADD, &nid);
+
+
+    // Initialization
+    time_t t = time(NULL);
+    struct tm tm_info = *localtime(&t);
+    today_date = (tm_info.tm_year + 1900) * 10000 + (tm_info.tm_mon + 1) * 100 + tm_info.tm_mday;
+    create_file_paths();
+    load_config(); // This might show a MessageBox if config is new, which is fine.
+    load_usage();
+
+    // Repeatable grace period logic
+    if (used_seconds >= TIME_LIMIT_SECONDS) {
+        used_seconds = TIME_LIMIT_SECONDS - GRACE_PERIOD_SECONDS_LOGIN;
+        save_usage();
+        ShowToastNotification("Grace Period", "Your screen time is up. A 10-minute grace period has been granted.");
+    }
+    
+    // Timer setup
+    SetTimer(hMainWnd, 1, 1000, TimerProc);
+
+    // Message loop
+    MSG msg;
+    while (GetMessage(&msg, NULL, 0, 0)) {
+        TranslateMessage(&msg);
+        DispatchMessage(&msg);
+    }
+    
+    // --- CLEANUP ---
+    Shell_NotifyIcon(NIM_DELETE, &nid); // Remove icon from tray on exit
+    ReleaseMutex(hMutex);
     CloseHandle(hMutex);
-
-    return 0;
+    return (int)msg.wParam;
 }
