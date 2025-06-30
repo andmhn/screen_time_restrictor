@@ -129,8 +129,10 @@ VOID CALLBACK TimerProc(HWND hwnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTime) {
         if (used_seconds >= TIME_LIMIT_SECONDS) {
             save_usage();
             // This is a critical, final notification, so it remains a blocking MessageBox.
-            MessageBox(NULL, "Screen time limit reached! Locking the system.", "Time Up", MB_OK | MB_ICONERROR | MB_TOPMOST);
+            // MessageBox(NULL, "Screen time limit reached! Locking the system.", "Time Up", MB_OK | MB_ICONERROR | MB_TOPMOST);
+            ShowToastNotification( "Time Up", "Screen time limit reached! Locking the system.");
             KillTimer(hMainWnd, 1);
+            Sleep(2000);
             LockWorkStation();
             PostQuitMessage(0);
         }
