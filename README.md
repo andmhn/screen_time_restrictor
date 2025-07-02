@@ -23,23 +23,6 @@ The program:
 4. Grants a configurable grace period when first exceeding limits
 5. Locks the workstation when the grace period expires
 
-## Installation
-
-1. Download the latest release
-2. Place `screen_time_restrictor.exe` in your preferred directory
-3. A `config.ini` file will be automatically created on first run
-
-## Configuration
-
-Edit `config.ini` to customize:
-
-```ini
-[Settings]
-TimeLimitSeconds=10800       # Daily limit in seconds (3 hour)
-WarningTimeSeconds=300       # Warn when this many seconds remain (5 mins)
-LoginGracePeriodSeconds=600  #  Emergency usage time after limit (10 mins)
-```
-
 ## Building from Source
 
 Requirements:
@@ -100,6 +83,16 @@ To make it run at startup:
 
 Now, every time a user unlocks the workstation, the Task Scheduler will trigger and run `screen_time_restrictor.exe` application.
 
+## Configuration
+
+Edit `config.ini` to customize:
+
+```ini
+[Settings]
+TimeLimitSeconds=10800       # Daily limit in seconds (3 hour)
+WarningTimeSeconds=300       # Warn when this many seconds remain (5 mins)
+LoginGracePeriodSeconds=600  #  Emergency usage time after limit (10 mins)
+```
 
 ## Contributing
 
