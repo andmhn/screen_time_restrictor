@@ -14,7 +14,7 @@
 #define WM_TRAYICON (WM_USER + 1) // Custom message for tray icon events
 
 // --- Global Variables for Settings (loaded from config.ini) ---
-int TIME_LIMIT_SECONDS = 3600;
+int TIME_LIMIT_SECONDS = 10800;
 int WARNING_TIME_SECONDS = 300;
 int GRACE_PERIOD_SECONDS_LOGIN = 600;
 
@@ -64,16 +64,16 @@ void load_config() {
     if (!PathFileExists(configFilePath)) {
         write_default_config();
     }
-    TIME_LIMIT_SECONDS = GetPrivateProfileInt("Settings", "TimeLimitSeconds", 3600, configFilePath);
-    WARNING_TIME_SECONDS = GetPrivateProfileInt("Settings", "WarningTimeSeconds", 300, configFilePath);
-    GRACE_PERIOD_SECONDS_LOGIN = GetPrivateProfileInt("Settings", "LoginGracePeriodSeconds", 600, configFilePath);
+    TIME_LIMIT_SECONDS = GetPrivateProfileInt("Settings", "TimeLimitSeconds", TIME_LIMIT_SECONDS, configFilePath);
+    WARNING_TIME_SECONDS = GetPrivateProfileInt("Settings", "WarningTimeSeconds", WARNING_TIME_SECONDS, configFilePath);
+    GRACE_PERIOD_SECONDS_LOGIN = GetPrivateProfileInt("Settings", "LoginGracePeriodSeconds", GRACE_PERIOD_SECONDS_LOGIN, configFilePath);
 }
 
 // Writes a default config.ini file if one doesn't exist.
 void write_default_config() {
-    WritePrivateProfileString("Settings", "TimeLimitSeconds", "3600", configFilePath);
-    WritePrivateProfileString("Settings", "WarningTimeSeconds", "300", configFilePath);
-    WritePrivateProfileString("Settings", "LoginGracePeriodSeconds", "600", configFilePath);
+    WritePrivateProfileString("Settings", "TimeLimitSeconds", "TIME_LIMIT_SECONDS", configFilePath);
+    WritePrivateProfileString("Settings", "WarningTimeSeconds", "WARNING_TIME_SECONDS", configFilePath);
+    WritePrivateProfileString("Settings", "LoginGracePeriodSeconds", "GRACE_PERIOD_SECONDS_LOGIN", configFilePath);
     // This notification will be shown before the icon is ready, so it remains a MessageBox.
     MessageBox(NULL, "config.ini not found.\nA new one has been created with default settings.", "Configuration Created", MB_OK | MB_ICONINFORMATION);
 }

@@ -35,9 +35,9 @@ Edit `config.ini` to customize:
 
 ```ini
 [Settings]
-TimeLimitSeconds=3600       # Daily limit in seconds (1 hour)
-WarningTimeSeconds=300      # Warn when this many seconds remain (5 mins)
-LoginGracePeriodSeconds=600 #  Emergency usage time after limit (10 mins)
+TimeLimitSeconds=10800       # Daily limit in seconds (3 hour)
+WarningTimeSeconds=300       # Warn when this many seconds remain (5 mins)
+LoginGracePeriodSeconds=600  #  Emergency usage time after limit (10 mins)
 ```
 
 ## Building from Source
@@ -59,8 +59,46 @@ Simply run the executable. It will:
 - Auto-lock when time expires
 
 To make it run at startup:
-1. Create a shortcut to the executable
-2. Place it in your Startup folder (`shell:startup`)
+
+### Installation
+
+1.  **Open Task Scheduler:**
+
+      * Press `Win + S` to open the search bar.
+      * Type `Task Scheduler` and press Enter.
+
+2.  **Create a New Task:**
+
+      * In the Task Scheduler window, in the right-hand "Actions" pane, click `Create Task...`.
+
+3.  **General Tab:**
+
+      * **Name:** Give your task a descriptive name, e.g., `Screen Time Restrictor - On Unlock`.
+      * **Description:** (Optional) Add a brief description, e.g., `Runs Screen Time Restrictor when the workstation is unlocked.`
+      * **Security options:**
+          * Check `Run with highest privileges`.
+
+4.  **Triggers Tab:**
+
+      * Click `New...`.
+      * **Begin the task:** Select `On workstation unlock`.
+      * **Settings:** Choose `Any user`.
+      * Click `OK`.
+
+5.  **Actions Tab:**
+
+      * Click `New...`.
+      * **Action:** Select `Start a program`.
+      * **Program/script:** Click `Browse...` and navigate to the location of your `screen_time_restrictor.exe` file. Select it and click `Open`.
+          * *Example:* `C:\screen_time_restrictor\screen_time_restrictor.exe`
+      * Click `OK`.
+
+8.  **Finish:**
+
+      * Click `OK`.
+      * You may be prompted to enter your Windows user account password. Enter it to save the task.
+
+Now, every time a user unlocks the workstation, the Task Scheduler will trigger and run `screen_time_restrictor.exe` application.
 
 
 ## Contributing
